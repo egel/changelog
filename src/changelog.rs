@@ -2,6 +2,7 @@
 
 use crate::cli::Cli;
 use crate::commits::{classify, Entry, ParsedCommit};
+use crate::config::Config;
 use crate::git::{commits_between, CommitInfo};
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
@@ -20,10 +21,13 @@ const SECTION_ORDER: [Entry; 6] = [
 pub const CHANGELOG_FILE: &str = "CHANGELOG.md";
 
 /// Collect and classify commits, grouped by section.
-pub fn collect_grouped(commits: &[CommitInfo]) -> BTreeMap<Entry, Vec<ParsedCommit>> {
+pub fn collect_grouped(
+    commits: &[CommitInfo],
+    config: &Config,
+) -> BTreeMap<Entry, Vec<ParsedCommit>> {
     let mut grouped: BTreeMap<Entry, Vec<ParsedCommit>> = BTreeMap::new();
     for commit in commits {
-        if let Some(parsed) = classify(commit) {
+        if let Some(parsed) = classify(commit, config) {
             grouped.entry(parsed.entry.clone()).or_default().push(parsed);
         }
     }
@@ -89,9 +93,10 @@ pub fn run_suggest(repo_path: &Path) -> Result<()> {
         .map_err(|_| anyhow::anyhow!("latest tag '{}' is not a semantic version", tag_name))?;
 
     let commits = commits_between(repo_path, None, None)?;
+    let config = Config::load(repo_path)?;
     let mut bump = Bump::Patch;
     for commit in &commits {
-        match classify(commit) {
+        match classify(commit, &config) {
             None => continue,
             Some(parsed) if parsed.breaking => bump = Bump::Major,
             Some(parsed) if parsed.entry == Entry::Added => bump = bump.max(Bump::Minor),
@@ -124,8 +129,9 @@ enum Bump {
 }
 /// Default command: generate the [Unreleased] section from git commits.
 pub fn run_generate(cli: &Cli, repo_path: &Path) -> Result<()> {
+    let config = Config::load(repo_path)?;
     let commits = commits_between(repo_path, cli.from.as_deref(), cli.to.as_deref())?;
-    let grouped = collect_grouped(&commits);
+    let grouped = collect_grouped(&commits, &config);
     let markdown = render_unreleased(&grouped, "[Unreleased]");
     print!("{}", markdown);
     Ok(())
@@ -145,8 +151,9 @@ pub fn run_init(repo_path: &Path, force: bool, with_history: bool, cli: &Cli) ->
 
     if with_history {
         // Header only; the history fills [Unreleased] below.
+        let config = Config::load(repo_path)?;
         let commits = commits_between(repo_path, cli.from.as_deref(), cli.to.as_deref())?;
-        let grouped = collect_grouped(&commits);
+        let grouped = collect_grouped(&commits, &config);
         content.push_str(&render_unreleased(&grouped, "[Unreleased]"));
     } else {
         content.push_str(&empty_unreleased());
@@ -193,8 +200,9 @@ pub fn run_in_place(cli: &Cli, repo_path: &Path) -> Result<()> {
     let existing = std::fs::read_to_string(&path)
         .with_context(|| format!("failed to read {}", path.display()))?;
 
+    let config = Config::load(repo_path)?;
     let commits = commits_between(repo_path, cli.from.as_deref(), cli.to.as_deref())?;
-    let grouped = collect_grouped(&commits);
+    let grouped = collect_grouped(&commits, &config);
 
     // With --version, the new content goes into a release section; otherwise Unreleased.
     let (title, updated) = match &cli.release {

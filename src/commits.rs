@@ -1,6 +1,7 @@
 //! Conventional Commit parsing: `type(scope)!: subject` with optional body
 //! and `BREAKING CHANGE:` footers. See https://www.conventionalcommits.org
 
+use crate::config::Config;
 use crate::git::CommitInfo;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -28,6 +29,19 @@ impl Entry {
             Entry::Uncategorized => "Uncategorized",
         }
     }
+
+    /// Parse a Keep a Changelog heading back into an Entry.
+    pub fn from_heading(heading: &str) -> Entry {
+        match heading {
+            "Added" => Entry::Added,
+            "Changed" => Entry::Changed,
+            "Deprecated" => Entry::Deprecated,
+            "Removed" => Entry::Removed,
+            "Fixed" => Entry::Fixed,
+            "Security" => Entry::Security,
+            _ => Entry::Uncategorized,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -42,22 +56,24 @@ pub struct ParsedCommit {
 }
 
 /// Classify a commit into a changelog entry. Returns `None` for commits that
-/// should be skipped entirely (chores, docs, CI, etc.).
-pub fn classify(commit: &CommitInfo) -> Option<ParsedCommit> {
-    let conventional = parse_conventional(&commit.subject);
-
-    // Skip non-user-facing commit types entirely.
-    if let Some(parsed) = &conventional {
-        if matches!(
-            parsed.r#type.as_str(),
-            "chore" | "docs" | "style" | "ci" | "test" | "tests" | "build"
-        ) {
-            return None;
-        }
+/// should be skipped entirely (config-mapped, chores, docs, CI, etc.).
+pub fn classify(commit: &CommitInfo, config: &Config) -> Option<ParsedCommit> {
+    // Subject exclusions from config.
+    if config
+        .exclude
+        .iter()
+        .any(|pattern| commit.subject.contains(pattern.as_str()))
+    {
+        return None;
     }
 
+    let conventional = parse_conventional(&commit.subject);
+
     let (entry, subject, scope) = match &conventional {
-        Some(parsed) => (map_type(&parsed.r#type), parsed.subject.clone(), parsed.scope.clone()),
+        Some(parsed) => {
+            let section = config.section_for_type(&parsed.r#type)?;
+            (Entry::from_heading(section), parsed.subject.clone(), parsed.scope.clone())
+        }
         None => (Entry::Uncategorized, commit.subject.clone(), None),
     };
 
@@ -160,20 +176,6 @@ fn extract_breaking_footer(body: &str) -> Option<String> {
     None
 }
 
-fn map_type(commit_type: &str) -> Entry {
-    match commit_type {
-        "feat" => Entry::Added,
-        "fix" => Entry::Fixed,
-        "perf" => Entry::Changed,
-        "refactor" => Entry::Changed,
-        "revert" => Entry::Removed,
-        "remove" | "removed" => Entry::Removed,
-        "deprecate" | "deprecated" => Entry::Deprecated,
-        "security" => Entry::Security,
-        _ => Entry::Uncategorized,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,9 +188,13 @@ mod tests {
         }
     }
 
+    fn cfg() -> Config {
+        Config::default()
+    }
+
     #[test]
     fn feat_added() {
-        let c = classify(&info("feat(api): add users endpoint", "")).unwrap();
+        let c = classify(&info("feat(api): add users endpoint", ""), &cfg()).unwrap();
         assert_eq!(c.entry, Entry::Added);
         assert_eq!(c.subject, "**api:** add users endpoint");
         assert!(!c.breaking);
@@ -196,34 +202,34 @@ mod tests {
 
     #[test]
     fn fix_fixed() {
-        let c = classify(&info("fix: handle empty body", "")).unwrap();
+        let c = classify(&info("fix: handle empty body", ""), &cfg()).unwrap();
         assert_eq!(c.entry, Entry::Fixed);
         assert_eq!(c.subject, "handle empty body");
     }
 
     #[test]
     fn breaking_bang() {
-        let c = classify(&info("feat!: change api", "")).unwrap();
+        let c = classify(&info("feat!: change api", ""), &cfg()).unwrap();
         assert_eq!(c.entry, Entry::Added);
         assert!(c.breaking);
     }
 
     #[test]
     fn breaking_footer() {
-        let c = classify(&info("feat: change api", "some body\nBREAKING CHANGE: config format changed")).unwrap();
+        let c = classify(&info("feat: change api", "some body\nBREAKING CHANGE: config format changed"), &cfg()).unwrap();
         assert!(c.breaking);
         assert_eq!(c.breaking_description.as_deref(), Some("config format changed"));
     }
 
     #[test]
     fn chore_skipped_to_uncategorized() {
-        let c = classify(&info("chore: bump deps", ""));
+        let c = classify(&info("chore: bump deps", ""), &cfg());
         assert!(c.is_none(), "chores should be skipped");
     }
 
     #[test]
     fn non_conventional() {
-        let c = classify(&info("weird message here", "")).unwrap();
+        let c = classify(&info("weird message here", ""), &cfg()).unwrap();
         assert_eq!(c.entry, Entry::Uncategorized);
         assert_eq!(c.subject, "weird message here");
     }

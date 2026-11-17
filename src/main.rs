@@ -3,6 +3,7 @@
 mod changelog;
 mod cli;
 mod commits;
+mod config;
 mod git;
 
 use anyhow::Result;
