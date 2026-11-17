@@ -1,0 +1,18 @@
+[package]
+name = "changelog"
+version = "0.1.0"
+edition = "2021"
+description = "Generate Keep a Changelog formatted changelogs from git commits"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+git2 = "0.20"
+anyhow = "1"
+thiserror = "2"
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[dev-dependencies]
+insta = { version = "1", features = ["yaml"] }
