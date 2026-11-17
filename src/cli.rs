@@ -37,7 +37,7 @@ pub struct Cli {
     #[arg(long)]
     pub release: Option<String>,
 
-    /// Generate the full history from all tags. (Later phase.)
+    /// Generate the full history from all tags.
     #[arg(long, conflicts_with_all = &["from", "to"])]
     pub all: bool,
 }#[derive(Subcommand)]

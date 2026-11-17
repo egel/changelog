@@ -127,6 +127,85 @@ enum Bump {
     Minor,
     Major,
 }
+/// `--all`: render the full history, one section per tag.
+pub fn run_all(repo_path: &Path) -> Result<()> {
+    let config = Config::load(repo_path)?;
+    let repo = git2::Repository::open(repo_path)?;
+    let tag_names = repo.tag_names(None)?;
+    if tag_names.is_empty() {
+        anyhow::bail!("no tags found in repository");
+    }
+
+    // Collect tags with their target commit times, sorted by semver ascending.
+    let mut tags: Vec<(semver::Version, String, i64)> = Vec::new();
+    let mut untagged: Option<(i64, String)> = None;
+    for name in tag_names.iter() {
+        let name = name.unwrap();
+        let reference = repo.find_reference(&format!("refs/tags/{}", name))?;
+        let commit = reference.peel_to_commit()?;
+        let time = commit.time().seconds();
+        match semver::Version::parse(name.trim_start_matches('v')) {
+            Ok(version) => tags.push((version, name.to_string(), time)),
+            Err(_) => {
+                untagged = Some(match untagged {
+                    Some((t, _)) if t >= time => untagged.unwrap(),
+                    _ => (time, name.to_string()),
+                });
+            }
+        }
+    }
+    if let Some((_, name)) = untagged {
+        eprintln!("warning: ignoring non-semver tag '{}'", name);
+    }
+    tags.sort();
+
+    let mut out = String::new();
+    out.push_str(scaffold_header());
+
+    // Newest first, oldest section last.
+    let mut sections: Vec<(String, String)> = Vec::new(); // (title, markdown)
+
+    // [Unreleased]: commits after the newest tag.
+    let newest_ref = format!("refs/tags/{}", tags.last().map(|(_, n, _)| n).unwrap());
+    let newest = repo.find_reference(&newest_ref)?.peel_to_commit()?;
+    let newest_sha = newest.id().to_string();
+    let commits = commits_between(repo_path, Some(newest_sha.as_str()), None)?;
+    let grouped = collect_grouped(&commits, &config);
+    if grouped.values().any(|v| !v.is_empty()) {
+        sections.push((
+            "[Unreleased]".to_string(),
+            render_unreleased(&grouped, "[Unreleased]"),
+        ));
+    }
+
+    // One section per tag: commits between the previous tag and this one.
+    for (i, (_, name, time)) in tags.iter().enumerate().rev() {
+        let from_oid = if i == 0 { None } else { Some(tags[i - 1].1.clone()) };
+        let start = match from_oid {
+            Some(ref name) => Some(
+                repo.find_reference(&format!("refs/tags/{}", name))?
+                    .peel_to_commit()?
+                    .id(),
+            ),
+            None => None, // whole history for the first tag
+        };
+        let end = repo.find_reference(&format!("refs/tags/{}", name))?.peel_to_commit()?.id();
+        let commits = crate::git::commits_between_objects(&repo, start, Some(end))?;
+        let grouped = collect_grouped(&commits, &config);
+        let (y, m, d) = civil_from_days(time.div_euclid(86_400));
+        sections.push((
+            name.clone(),
+            render_unreleased(&grouped, &format!("[{}] - {:04}-{:02}-{:02}", name, y, m, d)),
+        ));
+    }
+
+    for (_, markdown) in &sections {
+        out.push_str(markdown);
+    }
+    print!("{}", out);
+    Ok(())
+}
+
 /// Default command: generate the [Unreleased] section from git commits.
 pub fn run_generate(cli: &Cli, repo_path: &Path) -> Result<()> {
     let config = Config::load(repo_path)?;

@@ -33,11 +33,29 @@ pub fn commits_between(repo_path: &Path, from: Option<&str>, to: Option<&str>) -
         None => Some(head(&repo)?),
     };
 
-    // Range is (start..end]: include `end`, exclude `start`.
+    commits_between_objects(
+        &repo,
+        start.as_ref().map(git2::Object::id),
+        end.as_ref().map(git2::Object::id),
+    )
+}
+
+/// Collect commits in `(start..end]`, newest first. `end` defaults to HEAD;
+/// a `None` start means "all history up to end".
+pub fn commits_between_objects(
+    repo: &Repository,
+    start: Option<git2::Oid>,
+    end: Option<git2::Oid>,
+) -> Result<Vec<CommitInfo>> {
+    let end = match end {
+        Some(oid) => oid,
+        None => head(repo)?.id(),
+    };
+
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(Sort::TIME | Sort::TOPOLOGICAL)?;
-    revwalk.push(end.unwrap().id())?;
-    if let Some(start_id) = start.map(|o| o.id()) {
+    revwalk.push(end)?;
+    if let Some(start_id) = start {
         // hide commits reachable from the start reference
         revwalk.hide(start_id)?;
     }

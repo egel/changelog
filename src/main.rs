@@ -20,7 +20,9 @@ fn main() -> Result<()> {
         }
         Some(cli::Command::Suggest) => changelog::run_suggest(&repo_path),
         None => {
-            if cli.in_place {
+            if cli.all {
+                changelog::run_all(&repo_path)
+            } else if cli.in_place {
                 changelog::run_in_place(&cli, &repo_path)
             } else {
                 changelog::run_generate(&cli, &repo_path)
