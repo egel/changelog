@@ -78,6 +78,50 @@ fn render_item(commit: &ParsedCommit) -> Vec<String> {
     lines
 }
 
+/// `suggest` subcommand: semver bump suggestion from commit types.
+pub fn run_suggest(repo_path: &Path) -> Result<()> {
+    // Latest tag must be a version tag to base the bump on.
+    let repo = git2::Repository::open(repo_path)?;
+    let (tag_name, _) = crate::git::latest_tag(&repo)?
+        .ok_or_else(|| anyhow::anyhow!("no tags found in repository"))?;
+
+    let current = semver::Version::parse(tag_name.trim_start_matches('v'))
+        .map_err(|_| anyhow::anyhow!("latest tag '{}' is not a semantic version", tag_name))?;
+
+    let commits = commits_between(repo_path, None, None)?;
+    let mut bump = Bump::Patch;
+    for commit in &commits {
+        match classify(commit) {
+            None => continue,
+            Some(parsed) if parsed.breaking => bump = Bump::Major,
+            Some(parsed) if parsed.entry == Entry::Added => bump = bump.max(Bump::Minor),
+            Some(parsed) if parsed.entry == Entry::Fixed => bump = bump.max(Bump::Patch),
+            Some(parsed) if parsed.entry == Entry::Removed => bump = bump.max(Bump::Minor),
+            _ => {}
+        }
+    }
+
+    let next = semver::Version {
+        major: current.major + if bump == Bump::Major { 1 } else { 0 },
+        minor: if bump == Bump::Major {
+            0
+        } else {
+            current.minor + if bump == Bump::Minor { 1 } else { 0 }
+        },
+        patch: if bump == Bump::Patch { current.patch + 1 } else { 0 },
+        pre: semver::Prerelease::EMPTY,
+        build: semver::BuildMetadata::EMPTY,
+    };
+    println!("{}", next);
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Bump {
+    Patch,
+    Minor,
+    Major,
+}
 /// Default command: generate the [Unreleased] section from git commits.
 pub fn run_generate(cli: &Cli, repo_path: &Path) -> Result<()> {
     let commits = commits_between(repo_path, cli.from.as_deref(), cli.to.as_deref())?;

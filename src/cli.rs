@@ -52,4 +52,7 @@ pub enum Command {
         #[arg(long)]
         with_history: bool,
     },
+
+    /// Suggest the next semantic version based on commits since the latest tag.
+    Suggest,
 }

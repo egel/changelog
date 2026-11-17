@@ -17,6 +17,7 @@ fn main() -> Result<()> {
         Some(cli::Command::Init { force, with_history }) => {
             changelog::run_init(&repo_path, *force, *with_history, &cli)
         }
+        Some(cli::Command::Suggest) => changelog::run_suggest(&repo_path),
         None => {
             if cli.in_place {
                 changelog::run_in_place(&cli, &repo_path)

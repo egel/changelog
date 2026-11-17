@@ -22,7 +22,7 @@ pub fn commits_between(repo_path: &Path, from: Option<&str>, to: Option<&str>) -
     let start = match from {
         Some(ref_name) => resolve(&repo, ref_name)?,
         None => match latest_tag(&repo)? {
-            Some(obj) => Some(obj),
+            Some((_, obj)) => Some(obj),
             None => {
                 anyhow::bail!("no tags found in repository; use --from <ref> to specify a start point")
             }
@@ -91,15 +91,15 @@ fn resolve<'r>(repo: &'r Repository, ref_name: &str) -> Result<Option<git2::Obje
 }
 
 /// Find the latest tag reachable from HEAD, sorted by semver when possible,
-/// falling back to tagger/commit time.
-pub fn latest_tag(repo: &Repository) -> Result<Option<git2::Object<'_>>> {
+/// falling back to tagger/commit time. Returns (tag name, object).
+pub fn latest_tag(repo: &Repository) -> Result<Option<(String, git2::Object<'_>)>> {
     let tag_names = repo.tag_names(None)?;
     if tag_names.is_empty() {
         return Ok(None);
     }
 
-    let mut best: Option<(semver::Version, git2::Oid)> = None;
-    let mut newest_time: Option<(i64, git2::Oid)> = None;
+    let mut best: Option<(semver::Version, String, git2::Oid)> = None;
+    let mut newest_time: Option<(i64, String, git2::Oid)> = None;
 
     for name in tag_names.iter() {
         let name = name.unwrap(); // tags are valid UTF-8 in practice
@@ -107,26 +107,26 @@ pub fn latest_tag(repo: &Repository) -> Result<Option<git2::Object<'_>>> {
         let target = reference.peel_to_commit()?;
 
         if let Ok(version) = semver::Version::parse(name.trim_start_matches('v')) {
-            if best.as_ref().is_none_or(|(v, _)| version > *v) {
-                best = Some((version, target.id()));
+            if best.as_ref().is_none_or(|(v, _, _)| version > *v) {
+                best = Some((version, name.to_string(), target.id()));
             }
         } else {
             let time = target.time().seconds();
-            if newest_time.is_none_or(|(t, _)| time > t) {
-                newest_time = Some((time, target.id()));
+            if newest_time.as_ref().is_none_or(|(t, _, _)| time > *t) {
+                newest_time = Some((time, name.to_string(), target.id()));
             }
         }
     }
 
-    let oid = match (best, newest_time) {
-        (Some((_, oid)), _) => Some(oid),
-        (None, Some((_, oid))) => Some(oid),
+    let picked = match (best, newest_time) {
+        (Some((_, name, oid)), _) => Some((name, oid)),
+        (None, Some((_, name, oid))) => Some((name, oid)),
         (None, None) => None,
     };
-    match oid {
-        Some(oid) => repo
+    match picked {
+        Some((name, oid)) => repo
             .find_object(oid, Some(git2::ObjectType::Any))
-            .map(Some)
+            .map(|obj| Some((name, obj)))
             .map_err(Into::into),
         None => Ok(None),
     }
