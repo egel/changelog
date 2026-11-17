@@ -199,3 +199,20 @@ fn no_tags_helpful_error() {
     assert!(!ok);
     assert!(stderr.contains("no tags found"));
 }
+
+#[test]
+fn all_history_snapshot() {
+    let fx = Fixture::new(
+        "all-history",
+        &[
+            ("feat: initial", None),
+            ("fix: first bug", Some("v0.1.0")),
+            ("feat: second feature", Some("v0.2.0")),
+            ("fix: second bug", None),
+            ("feat: unreleased thing", None),
+        ],
+    );
+    let (stdout, stderr, ok) = run(&["--all"], &fx.dir);
+    assert!(ok, "--all failed: {}", stderr);
+    insta::assert_yaml_snapshot!(stdout);
+}
