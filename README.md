@@ -19,6 +19,19 @@ automatically:
 | `chore`, `docs`, `style`, `ci`, `test`, `build` | skipped |
 | anything else | Uncategorized |
 
+Commits that share a Conventional Commit scope are grouped under one bullet,
+so a handful of `fix(git)` commits reads as one topic:
+
+```markdown
+### Fixed
+
+- **git**:
+    - add ignore orig files while merging
+    - remove broken scopes alias
+- **cicd**: add lint check
+- handle empty body
+```
+
 ## Usage
 
 ```sh
@@ -54,3 +67,17 @@ exclude = ["internal refactor"]
 cargo build --release   # binary at target/release/changelog
 cargo test              # unit + integration tests (insta snapshots)
 ```
+
+## Working on tests
+
+Integration tests are snapshot tests powered by
+[insta](https://insta.rs). Each test compares its output against a committed
+`.snap` file in `tests/snapshots/`, so those files are part of the repo —
+commit them whenever you intentionally change a test's expected output.
+
+When a test fails, insta writes the new output next to the snapshot as
+`<name>.snap.new` instead of failing silently. Review the diff, then either
+accept it (replace the old snapshot, e.g. with `cargo insta accept` or by
+moving the file over the `.snap`) or reject it (delete the file). Never
+commit `.snap.new` files — they're pending reviews, not assertions.
+

@@ -53,6 +53,9 @@ pub struct ParsedCommit {
     pub breaking: bool,
     /// Extra description from a BREAKING CHANGE footer, if any.
     pub breaking_description: Option<String>,
+    /// Conventional Commit scope (`feat(api)` → `Some("api")`), used to
+    /// group related commits under one bullet.
+    pub scope: Option<String>,
 }
 
 /// Classify a commit into a changelog entry. Returns `None` for commits that
@@ -90,13 +93,8 @@ pub fn classify(commit: &CommitInfo, config: &Config) -> Option<ParsedCommit> {
         breaking = true;
     }
 
-    // Render scope into the subject: "feat(api): add route" → "**api:** add route"
-    let subject = match scope {
-        Some(scope) => format!("**{}:** {}", scope, subject),
-        None => subject,
-    };
-
-    // Ensure the subject ends sensibly (strip trailing period, we add our own formatting).
+    // The scope is kept separate so the renderer can group commits by it;
+    // subject is just the human-readable description.
     let subject = subject.trim_end_matches('.').to_string();
 
     Some(ParsedCommit {
@@ -104,6 +102,7 @@ pub fn classify(commit: &CommitInfo, config: &Config) -> Option<ParsedCommit> {
         subject,
         breaking,
         breaking_description,
+        scope,
     })
 }
 
@@ -196,7 +195,8 @@ mod tests {
     fn feat_added() {
         let c = classify(&info("feat(api): add users endpoint", ""), &cfg()).unwrap();
         assert_eq!(c.entry, Entry::Added);
-        assert_eq!(c.subject, "**api:** add users endpoint");
+        assert_eq!(c.subject, "add users endpoint");
+        assert_eq!(c.scope.as_deref(), Some("api"));
         assert!(!c.breaking);
     }
 

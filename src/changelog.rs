@@ -42,11 +42,9 @@ pub fn render_unreleased(grouped: &BTreeMap<Entry, Vec<ParsedCommit>>, title: &s
         if let Some(items) = grouped.get(&entry) {
             if !items.is_empty() {
                 out.push_str(&format!("### {}\n", entry.heading()));
-                for item in items {
-                    for line in render_item(item) {
-                        out.push_str(&line);
-                        out.push('\n');
-                    }
+                for line in render_section(items) {
+                    out.push_str(&line);
+                    out.push('\n');
                 }
                 out.push('\n');
             }
@@ -56,11 +54,9 @@ pub fn render_unreleased(grouped: &BTreeMap<Entry, Vec<ParsedCommit>>, title: &s
     if let Some(items) = grouped.get(&Entry::Uncategorized) {
         if !items.is_empty() {
             out.push_str("### Uncategorized\n");
-            for item in items {
-                for line in render_item(item) {
-                    out.push_str(&line);
-                    out.push('\n');
-                }
+            for line in render_section(items) {
+                out.push_str(&line);
+                out.push('\n');
             }
             out.push('\n');
         }
@@ -69,16 +65,54 @@ pub fn render_unreleased(grouped: &BTreeMap<Entry, Vec<ParsedCommit>>, title: &s
     out
 }
 
-fn render_item(commit: &ParsedCommit) -> Vec<String> {
+/// Render one section: breaking changes stay top-level, everything else is
+/// grouped by Conventional Commit scope. Commits that share a scope become one
+/// `- **scope**:` bullet with nested items; a scope used once stays inline.
+fn render_section(items: &[ParsedCommit]) -> Vec<String> {
     let mut lines = Vec::new();
-    if commit.breaking {
+
+    // Breaking changes first, each as its own bullet.
+    for commit in items.iter().filter(|c| c.breaking) {
         lines.push(format!("- **BREAKING:** {}", commit.subject));
         if let Some(desc) = &commit.breaking_description {
             lines.push(format!("  {}", desc.trim_end_matches('.')));
         }
-    } else {
-        lines.push(format!("- {}", commit.subject));
     }
+
+    // Group the rest by scope, in order of first appearance.
+    let mut order: Vec<Option<String>> = Vec::new();
+    let mut groups: BTreeMap<Option<String>, Vec<&ParsedCommit>> = BTreeMap::new();
+    for commit in items.iter().filter(|c| !c.breaking) {
+        let key = commit.scope.clone();
+        if !order.contains(&key) {
+            order.push(key.clone());
+        }
+        groups.entry(key).or_default().push(commit);
+    }
+
+    for scope in order {
+        let members = &groups[&scope];
+        let scope_bullet = match &scope {
+            Some(name) => format!("**{}**", name),
+            None => continue, // unscoped commits render as plain bullets below
+        };
+        if members.len() == 1 {
+            lines.push(format!("- {}: {}", scope_bullet, members[0].subject));
+        } else {
+            lines.push(format!("- {}:", scope_bullet));
+            for commit in members {
+                lines.push(format!("    - {}", commit.subject));
+            }
+        }
+    }
+
+    // Unscoped commits last, as plain bullets.
+    if let Some(plain) = groups.get(&None) {
+        for commit in plain {
+            lines.push(format!("- {}", commit.subject));
+        }
+    }
+
     lines
 }
 
@@ -488,6 +522,36 @@ mod tests {
         let new_section = "## Unreleased\n\n### Fixed\n- fix\n\n";
         let updated = replace_unreleased(existing, new_section).unwrap();
         assert!(updated.ends_with("### Fixed\n- fix\n\n"));
+    }
+
+    fn commit(scope: Option<&str>, subject: &str, breaking: bool) -> ParsedCommit {
+        ParsedCommit {
+            entry: Entry::Added,
+            subject: subject.to_string(),
+            breaking,
+            breaking_description: None,
+            scope: scope.map(String::from),
+        }
+    }
+
+    #[test]
+    fn grouped_by_scope() {
+        let items = vec![
+            commit(Some("git"), "add auto colors", false),
+            commit(Some("git"), "add git scopes", false),
+            commit(Some("cicd"), "add lint check", false),
+            commit(None, "add loose change", false),
+        ];
+        assert_eq!(
+            render_section(&items),
+            vec![
+                "- **git**:".to_string(),
+                "    - add auto colors".to_string(),
+                "    - add git scopes".to_string(),
+                "- **cicd**: add lint check".to_string(),
+                "- add loose change".to_string(),
+            ]
+        );
     }
 
     #[test]
