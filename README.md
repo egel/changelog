@@ -32,6 +32,32 @@ so a handful of `fix(git)` commits reads as one topic:
 - handle empty body
 ```
 
+## Typical workflow
+
+The tool reads commits between git tags, so the changelog is only as good as
+your tags: make a release, tag it, push the tag.
+
+**First time on an existing repo**, scaffold the file from history:
+
+```sh
+changelog init --with-history
+```
+
+**Day to day**, nothing changes: commit with Conventional Commits (`feat:`,
+`fix:`, …) and let the tool sort them later. `chore`, `docs`, `ci` and friends
+are skipped automatically.
+
+**When you release:**
+
+```sh
+changelog --in-place --release 1.0.0   # [Unreleased] → [1.0.0] - today, fresh [Unreleased]
+git tag v1.0.0 && git push --tags
+```
+
+That's the whole loop. Need to fix something up after the fact? Regenerate a
+specific range with `--from`/`--to`, rebuild everything with `--all`, or run
+`changelog suggest` to get a semver bump recommendation from the commits.
+
 ## Usage
 
 ```sh
